@@ -156,7 +156,7 @@ export default function ChannelsPage() {
   const [restartNeeded, setRestartNeeded] = useState(false);
   const [restarting, setRestarting] = useState(false);
 
-  const gatewayRunning = platforms.length > 0 && platforms[0].gateway_running;
+  const gatewayRunning = platforms.some((platform) => platform.gateway_running);
 
   const load = useCallback(() => {
     return api
@@ -562,6 +562,18 @@ export default function ChannelsPage() {
                       <span className="text-xs text-muted-foreground">
                         {platform.description}
                       </span>
+                      {platform.managed_by_profile && (
+                        <span className="text-xs text-primary">
+                          Connected through shared gateway profile{" "}
+                          <code className="font-courier">
+                            {platform.managed_by_profile}
+                          </code>
+                          {platform.shared_route_scope === "scoped"
+                            ? " for routed conversations"
+                            : " for this channel"}
+                          . Configure credentials on that profile.
+                        </span>
+                      )}
                       {platform.error_message && (
                         <span className="text-xs text-destructive">
                           {platform.error_message}
@@ -578,6 +590,7 @@ export default function ChannelsPage() {
                         <Switch
                           checked={platform.enabled}
                           onCheckedChange={() => void handleToggle(platform)}
+                          disabled={Boolean(platform.managed_by_profile)}
                           aria-label={`Enable ${platform.name}`}
                         />
                       )}
@@ -602,6 +615,7 @@ export default function ChannelsPage() {
                         size="sm"
                         className="uppercase"
                         onClick={() => openConfig(platform)}
+                        disabled={Boolean(platform.managed_by_profile)}
                         prefix={<Settings2 className="h-4 w-4" />}
                       >
                         Configure
@@ -609,7 +623,7 @@ export default function ChannelsPage() {
                     )}
                   </div>
                 </div>
-                {platform.id === "telegram" && (
+                {platform.id === "telegram" && !platform.managed_by_profile && (
                   <TelegramOnboardingPanel
                     onManualSetup={() => openConfig(platform)}
                     onChanged={load}
@@ -619,7 +633,7 @@ export default function ChannelsPage() {
                     showToast={showToast}
                   />
                 )}
-                {platform.id === "whatsapp" && (
+                {platform.id === "whatsapp" && !platform.managed_by_profile && (
                   <WhatsAppOnboardingPanel
                     onChanged={load}
                     onRestartNeeded={() => setRestartNeeded(true)}
