@@ -1,7 +1,8 @@
 name: Publish maintenance image
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [codex/publish-maintenance-image]
 
 permissions:
   contents: read
