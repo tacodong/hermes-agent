@@ -1,0 +1,47 @@
+name: Publish maintenance image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - name: Check out the reviewed maintenance patch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: codex/shared-gateway-status-v021
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish the exact arm64 maintenance image
+        id: build
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ghcr.io/tacodong/hermes-agent:0.21.0-shared-gateway-8af5c55b79
+          labels: org.opencontainers.image.source=https://github.com/tacodong/hermes-agent
+          build-args: HERMES_GIT_SHA=8af5c55b79aeef1e5d16b114c926ac64ddf7d791
+          cache-from: type=gha,scope=maintenance-arm64
+          cache-to: type=gha,mode=max,scope=maintenance-arm64
+
+      - name: Record immutable digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: test "${IMAGE_DIGEST#sha256:}" != "$IMAGE_DIGEST" && printf '%s\n' "$IMAGE_DIGEST"
