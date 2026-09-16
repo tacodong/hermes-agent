@@ -133,7 +133,7 @@ def build_write_approval_paths(home: str) -> set[str]:
 _HERMES_PROTECTED_SUBPATHS = ("state.db", "sessions", "mcp-tokens", "pairing")
 
 
-def _classify_write_denial(path: str) -> Optional[str]:
+def _classify_write_denial(path: str, *, safe_roots=None) -> Optional[str]:
     """Return ``'credential'``, ``'safe_root'``, or ``None`` if writes are allowed."""
     home, resolved = _home_and_resolved(path)
 
@@ -153,7 +153,7 @@ def _classify_write_denial(path: str) -> Optional[str]:
                 if _is_under(resolved, os.path.realpath(os.path.join(str(base), sub))):
                     return "credential"
 
-    safe_roots = get_safe_write_roots()
+    safe_roots = get_safe_write_roots() if safe_roots is None else safe_roots
     if safe_roots and not any(_is_under(resolved, root) for root in safe_roots):
         return "safe_root"
 
@@ -165,9 +165,9 @@ def is_write_denied(path: str) -> bool:
     return _classify_write_denial(path) is not None
 
 
-def get_write_denied_error(path: str, *, verb: str = "Write") -> Optional[str]:
+def get_write_denied_error(path: str, *, verb: str = "Write", safe_roots=None) -> Optional[str]:
     """Return a user/model-facing error when writes to ``path`` are blocked."""
-    denial = _classify_write_denial(path)
+    denial = _classify_write_denial(path, safe_roots=safe_roots)
     if denial == "safe_root":
         roots_display = os.pathsep.join(sorted(get_safe_write_roots()))
         return (

@@ -41,3 +41,14 @@ Native Bot Chat local/peer messaging also used bare `hermes`, unlike the relay
 path. Both now use the existing venv-sibling executable resolver. The focused
 Bot Mode suite passes 43 tests, including a real child launch with an empty PATH
 and a runtime path containing spaces. No roster or recipient authorization changes.
+
+The follow-up file baseline uses the routed profile's terminal scope for Desktop
+backend/cwd resolution instead of ambient process values. SSH file writes can
+opt into `terminal.file_write_roots`, a nonempty list of canonical existing
+executor directories. The override applies only with a bound profile scope and
+an SSH environment. Remote canonicalization rejects escaping symlinks, broad
+roots, malformed policy, and failed probes; other profiles/backends retain the
+existing process root. Credential/system guards remain. This is a file-tool
+boundary, not an OS sandbox or protection against concurrent filesystem races.
+Tests use a synthetic SSH transport over real files for write/readback, patch,
+move refusal, symlink escape, malformed roots and cross-profile fallback.
