@@ -33,6 +33,11 @@ existing systemd tests require Linux and fail when run on macOS; Linux validatio
 must be recorded separately. Desktop acceptance and deployment receipts belong
 to the homelab owner; Python tests do not prove visible UI acceptance.
 
-`docker/maintenance/Desktop.Dockerfile` overlays only the three changed runtime
+`docker/maintenance/Desktop.Dockerfile` overlays only the changed runtime
 files onto the immutable deployed image. Build with the source revision label,
 then deploy by digest through the existing fleet controller.
+
+Native Bot Chat local/peer messaging also used bare `hermes`, unlike the relay
+path. Both now use the existing venv-sibling executable resolver. The focused
+Bot Mode suite passes 43 tests, including a real child launch with an empty PATH
+and a runtime path containing spaces. No roster or recipient authorization changes.

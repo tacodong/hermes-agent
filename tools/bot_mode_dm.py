@@ -180,7 +180,7 @@ def message_agent_tool(target: str = "", message: str = "", task_id: Optional[st
             BOT_CHAT_TITLE, _handle, _hermes_root, _peers, _profile_name as _self_profile_name, _roster,
             is_bot_mode_managed,
         )
-        from tools.bot_relay import BOT_CHAT_TURN_ARGS
+        from tools.bot_relay import BOT_CHAT_TURN_ARGS, _hermes_cli
 
         if _session_title(agent) != BOT_CHAT_TITLE:
             return _err("message_agent is only available in a Bot Mode 'Bot Chat' session. "
@@ -222,7 +222,7 @@ def message_agent_tool(target: str = "", message: str = "", task_id: Optional[st
         # Pin the registry-owning profile: `hermes peer` resolves bot_peers via the profile-scoped
         # load_config(), while the roster above reads the machine-root config — the CLI must run
         # in that same profile or a secondary-profile bot sees an empty registry.
-        return _start_delivery(["hermes", "-p", _self_profile_name(root), "peer", "dm", dm_target], content,
+        return _start_delivery([_hermes_cli(), "-p", _self_profile_name(root), "peer", "dm", dm_target], content,
                                f"@{peer_profile or peer_name} on peer '{peer_name}'", stdin_file=True, **delivery)
 
     # Local teammate.
@@ -242,7 +242,7 @@ def message_agent_tool(target: str = "", message: str = "", task_id: Optional[st
         return _roster_err(f"No teammate named '{raw_target}' on this install, on a connected "
                            "machine, or on a registered peer. Pick a name from the roster "
                            "(roles are listed in your system prompt).")
-    return _start_delivery(["hermes", "-p", resolved, *BOT_CHAT_TURN_ARGS], content, f"@{_handle(resolved)}",
+    return _start_delivery([_hermes_cli(), "-p", resolved, *BOT_CHAT_TURN_ARGS], content, f"@{_handle(resolved)}",
                            stdin_file=False, **delivery)
 
 
