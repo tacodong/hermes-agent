@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tools import bot_mode_dm, bot_mode_probe
+from tools import bot_mode_dm, bot_mode_probe, bot_relay
 
 
 @pytest.fixture(autouse=True)
@@ -247,7 +247,7 @@ def test_local_delivery_command_and_ack(tmp_path, monkeypatch):
     mode, dm_file, transport_argv = _runner_parts(command)
     assert mode == "query-file"
     assert transport_argv == [
-        "hermes",
+        bot_relay._hermes_cli(),
         "-p",
         "researcher",
         "chat",
@@ -294,7 +294,7 @@ def test_peer_delivery_command_pins_registry_profile_for_secondary_bots(
     assert mode == "stdin"
     # The registry the tool validated against is the machine root's — the
     # default profile's home — so the CLI runs there, not in reviewer.
-    assert transport_argv == ["hermes", "-p", "default", "peer", "dm", "spark"]
+    assert transport_argv == [bot_relay._hermes_cli(), "-p", "default", "peer", "dm", "spark"]
 
 
 def test_peer_delivery_command(tmp_path, monkeypatch):
@@ -309,7 +309,7 @@ def test_peer_delivery_command(tmp_path, monkeypatch):
     assert "spark" in result["to"]
     mode, _dm_file, transport_argv = _runner_parts(calls[0]["command"])
     assert mode == "stdin"
-    assert transport_argv == ["hermes", "-p", "default", "peer", "dm", "spark/researcher"]
+    assert transport_argv == [bot_relay._hermes_cli(), "-p", "default", "peer", "dm", "spark/researcher"]
 
     # bare peer name targets the peer's main agent
     result2 = json.loads(
@@ -318,7 +318,7 @@ def test_peer_delivery_command(tmp_path, monkeypatch):
     assert result2["status"] == "sent"
     mode, _dm_file, transport_argv = _runner_parts(calls[1]["command"])
     assert mode == "stdin"
-    assert transport_argv == ["hermes", "-p", "default", "peer", "dm", "spark"]
+    assert transport_argv == [bot_relay._hermes_cli(), "-p", "default", "peer", "dm", "spark"]
 
 
 def test_named_profile_sender_prefix(tmp_path, monkeypatch):
@@ -723,3 +723,25 @@ def test_dm_dir_rejects_precreated_symlink(tmp_path, monkeypatch):
 
     with pytest.raises(PermissionError, match="not a directory"):
         bot_mode_dm._dm_dir()
+
+
+def test_message_agent_executes_sibling_cli_without_path(tmp_path, monkeypatch):
+    """Service PATH omits the venv; both the resolver and real child launch matter."""
+    runtime = tmp_path / "runtime with spaces"
+    runtime.mkdir()
+    python = runtime / "python"
+    python.symlink_to(sys.executable)
+    cli = runtime / "hermes"
+    cli.write_text("#!" + sys.executable + "\nimport sys\nprint('RECIPIENT-EXECUTED:' + sys.argv[2])\n")
+    cli.chmod(0o700)
+    home = _managed_home(tmp_path, teammates=("researcher",))
+    agent = _FakeAgent(home, title="Bot Chat")
+    monkeypatch.setattr(sys, "executable", str(python))
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
+    def launch(argv, content, label, **kwargs):
+        result = subprocess.run(argv, capture_output=True, text=True, check=True)
+        assert argv[0] == str(cli)
+        assert argv[1:3] == ["-p", "researcher"]
+        return result.stdout
+    monkeypatch.setattr(bot_mode_dm, "_start_delivery", launch)
+    assert bot_mode_dm.message_agent_tool(target="researcher", message="synthetic", agent=agent).strip() == "RECIPIENT-EXECUTED:researcher"

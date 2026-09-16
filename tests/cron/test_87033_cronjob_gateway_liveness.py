@@ -368,3 +368,26 @@ class TestCronStatusLockFirst:
     def test_no_lock_no_pids_still_warns(self, hermes_env):
         text = self._run_status(pids=[], lock_active=False)
         assert "NOT fire" in text
+
+
+@pytest.mark.parametrize("served,mode,expected", [
+    (["gateway-owner", "satellite"], "multiplex", True),
+    (["gateway-owner", "other"], "multiplex", False),
+    ([], "none", False),
+    ([], "unknown", None),
+])
+def test_named_owner_scheduler_liveness(served, mode, expected):
+    from unittest.mock import patch
+    from hermes_cli.cron import _builtin_gateway_liveness
+    with (
+        patch("hermes_cli.cron._active_cron_provider_name", return_value="builtin"),
+        patch("gateway.status.is_gateway_runtime_lock_active", return_value=False),
+        patch("hermes_cli.gateway.find_gateway_pids", return_value=[]),
+        patch("hermes_cli.gateway.named_profile_served_by_running_multiplexer", return_value=False),
+        patch("hermes_cli.profiles.get_active_profile_name", return_value="satellite"),
+        patch("hermes_cli.web_server_gateway._collect_profile_gateway_topology", return_value={
+            "gateway_mode": mode,
+            "gateways": [{"profile": "gateway-owner", "served_profiles": served}] if served else [],
+        }),
+    ):
+        assert _builtin_gateway_liveness() is expected

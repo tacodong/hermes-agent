@@ -207,6 +207,49 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
             exit_code = 1
         return ExecuteResult(stdout=result.get("output", ""), exit_code=exit_code)
 
+    def _write_denied_error(self, path: str, *, verb: str = "Write") -> Optional[str]:
+        """Use explicit profile SSH roots only on an SSH environment.
+
+        The remote filesystem, not the coordinator, resolves symlinks. All other
+        callers retain the process safe-root policy. No scope means no override.
+        This remains a tool guard, not an OS sandbox or protection from concurrent
+        filesystem replacement by another process.
+        """
+        from tools.environments.ssh import SSHEnvironment
+        from tools.terminal_scope import get_terminal_scope, enforce_no_refusal
+
+        enforce_no_refusal()
+        scope = get_terminal_scope()
+        raw = scope.get("TERMINAL_FILE_WRITE_ROOTS") if scope is not None else None
+        if raw is None or not isinstance(self.env, SSHEnvironment):
+            return get_write_denied_error(path, verb=verb)
+        try:
+            roots = json.loads(raw)
+            if not isinstance(roots, list) or not roots or not all(
+                isinstance(root, str) and root.startswith("/") and "\x00" not in root
+                for root in roots
+            ):
+                raise ValueError("invalid roots")
+            # Require canonical, bounded directories on the executor. A symlink
+            # root must not silently redefine the policy when its target changes.
+            snippet = (
+                "import os,json\n"
+                f"roots={roots!r}\npath={path!r}\n"
+                "home=os.path.realpath(os.path.expanduser('~'))\n"
+                "valid=all(os.path.realpath(r)==os.path.normpath(r) and "
+                "os.path.isdir(r) and r not in ('/', '/home', '/tmp', home) for r in roots)\n"
+                "p=os.path.realpath(os.path.expanduser(path))\n"
+                "allowed=valid and any(p!=r and os.path.commonpath([p,r])==r for r in roots)\n"
+                "print(json.dumps({'allowed':allowed}))\n"
+            )
+            result = self._run_python_snippet(snippet)
+            if result.exit_code != 0 or json.loads(result.stdout).get("allowed") is not True:
+                return f"{verb} denied: path is outside the profile SSH file-write roots or resolves through an escaping symlink."
+        except Exception:
+            return f"{verb} denied: profile SSH file-write policy could not be verified."
+        # Only the container-root check is replaced; credential/system denials stay.
+        return get_write_denied_error(path, verb=verb, safe_roots=())
+
     def _has_command(self, cmd: str) -> bool:
         """Check if a command exists in the environment (cached); rg goes through
         the resolver so a mid-session install becomes visible."""
@@ -1020,7 +1063,7 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
         """Delete a single file (directories rejected) via the backend's ``python -c``
         so one code path works on local/docker/ssh AND Windows shells (no ``rm``)."""
         path = self._expand_path(path)
-        denied = get_write_denied_error(path, verb="Delete")
+        denied = self._write_denied_error(path, verb="Delete")
         if denied:
             return WriteResult(error=denied)
         # Path baked in via repr() for shell-independent quoting; no
@@ -1050,7 +1093,7 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
         src = self._expand_path(src)
         dst = self._expand_path(dst)
         for p in (src, dst):
-            denied = get_write_denied_error(p, verb="Move")
+            denied = self._write_denied_error(p, verb="Move")
             if denied:
                 return WriteResult(error=denied)
         result = self._exec(f"mv {self._escape_shell_arg(src)} {self._escape_shell_arg(dst)}")
@@ -1217,7 +1260,7 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
         caller already has (skips the read); BOM detection always probes disk.
         """
         path = self._expand_path(path)
-        denied = get_write_denied_error(path)
+        denied = self._write_denied_error(path)
         if denied:
             return WriteResult(error=denied)
         refused = self._reject_unencodable(path, content)
@@ -1313,7 +1356,7 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
         """Replace text in a file using fuzzy matching (``old_string`` must be
         unique unless ``replace_all``). Returns a PatchResult with diff + lint."""
         path = self._expand_path(path)
-        denied = get_write_denied_error(path)
+        denied = self._write_denied_error(path)
         if denied:
             return PatchResult(error=denied)
         read_result = self._cat(path)

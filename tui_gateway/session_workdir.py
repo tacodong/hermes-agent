@@ -59,7 +59,8 @@ def _terminal_task_cwd_with_source(session: dict | None) -> tuple[str, str]:
         # THIS session's explicit workspace beats the LAST session's env var.
         if session and session.get("explicit_cwd") and session.get("cwd"):
             return str(session["cwd"]), "session"
-        raw = os.environ.get("TERMINAL_CWD", "").strip() or _workdir_terminal_cfg("cwd")
+        from tools.terminal_scope import terminal_env
+        raw = terminal_env("TERMINAL_CWD", "").strip() or _workdir_terminal_cfg("cwd")
         if raw and raw not in {".", "auto", "cwd"}:
             return raw, "process"
         if backend == "ssh":
@@ -114,14 +115,16 @@ def _heal_dead_cwd(cwd: str) -> str:
 
 
 def _is_local_terminal_backend() -> bool:
-    backend = (os.environ.get("TERMINAL_ENV") or "").strip().lower()
+    from tools.terminal_scope import terminal_env
+    backend = terminal_env("TERMINAL_ENV", "").strip().lower()
     return not backend or backend == "local"
 
 
 def _effective_terminal_backend() -> str:
     """Active terminal backend name (``local``, ``docker``, ``ssh``, ...): ``TERMINAL_ENV`` when set (launchers bridge
     ``terminal.backend`` into env), else the ``terminal.backend`` config key (in-process gateways skip that bridge)."""
-    backend = (os.environ.get("TERMINAL_ENV") or "").strip().lower()
+    from tools.terminal_scope import terminal_env
+    backend = terminal_env("TERMINAL_ENV", "").strip().lower()
     if not backend or backend == "local":
         backend = _workdir_terminal_cfg("backend").lower()
     return backend or "local"

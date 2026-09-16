@@ -1,0 +1,31 @@
+name: Publish Desktop maintenance overlay
+on:
+  push:
+    branches: [codex/desktop-capabilities]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  publish:
+    if: github.repository == 'tacodong/hermes-agent'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f
+        id: image
+        with:
+          context: .
+          file: docker/maintenance/Desktop.Dockerfile
+          push: true
+          tags: ghcr.io/tacodong/hermes-agent:desktop-${{ github.sha }}
+          build-args: HERMES_GIT_SHA=${{ github.sha }}
+      - name: Immutable image receipt
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: printf '%s\n' "$DIGEST"

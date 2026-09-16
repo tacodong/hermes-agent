@@ -920,9 +920,13 @@ class ProcessRegistry:
         temp_dir = self._env_temp_dir(env)
         log_path, pid_path, exit_path = (f"{temp_dir}/hermes_bg_{session.id}.{ext}" for ext in ("log", "pid", "exit"))
         q = shlex.quote
+        # This inner login shell can change directory independently of the
+        # environment's foreground shell. Apply the requested remote cwd there,
+        # without changing the shared environment used by sibling commands.
+        launch_command = f"cd -- {q(cwd)} && {command}" if cwd else command
         bg_command = (
             f"mkdir -p {q(temp_dir)} && "
-            f"( nohup bash -lc {q(command)} > {q(log_path)} 2>&1; "
+            f"( nohup bash -lc {q(launch_command)} > {q(log_path)} 2>&1; "
             f"rc=$?; printf '%s\\n' \"$rc\" > {q(exit_path)} ) & "
             f"echo $! > {q(pid_path)} && cat {q(pid_path)}")
         try:
