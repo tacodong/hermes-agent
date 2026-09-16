@@ -1105,11 +1105,19 @@ def _approval_reply(rid, result_key, call):
         return _err(rid, 5004, str(e))
 
 
+def _approval_session_owned(session: dict) -> bool:
+    """An approval id is correlation data, not authority to another session."""
+    transport = current_transport()
+    return transport is None or session.get("transport") is transport
+
+
 @method("approval.pending")
 def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)
     if err:
         return err
+    if not _approval_session_owned(session):
+        return _err(rid, 4001, "session not found")
     return _approval_reply(
         rid, "approvals", lambda a: a.list_gateway_approvals(session["session_key"]))
 
@@ -1119,6 +1127,8 @@ def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)
     if err:
         return err
+    if not _approval_session_owned(session):
+        return _err(rid, 4001, "session not found")
     if not isinstance(request_id := params.get("request_id"), str) or not request_id:
         return _err(rid, 4006, "request_id required")
     return _approval_reply(
@@ -1126,26 +1136,9 @@ def _(rid, params: dict) -> dict:
 
 
 def _approval_respond_session_fallback(params: dict):
-    """Durable-identity fallback for a stale live sid (re-minted after a reconnect while
-    the prompt stayed on screen): (1) the ``request_id`` against every live session's
-    pending approvals, then (2) ``session_id`` as a STORED id.  Live session or None.
-
-    See #91684.
-    """
-    request_id = str(params.get("request_id") or "")
-    if request_id:
-        try:
-            from tools.approval import list_gateway_approvals
-            with _sessions_lock:
-                live = list(_sessions.items())
-            for sid, session in live:
-                key = str(session.get("session_key") or "")
-                if key and any(
-                    str(pending.get("request_id") or "") == request_id
-                    for pending in list_gateway_approvals(key)):
-                    return session
-        except Exception:
-            logger.debug("approval.respond request_id fallback failed", exc_info=True)
+    """Resolve a durable session id after reconnect; never treat a request id as ownership."""
+    # Never search every session by request_id: a response naming a different
+    # or retired session must not consume the owner's single-use approval.
     if target := str(params.get("session_id") or ""):
         try:
             if (live := _find_live_session_by_key(target)) is not None:
@@ -1165,6 +1158,8 @@ def _(rid, params: dict) -> dict:
         session = _approval_respond_session_fallback(params)
         if session is None:
             return err
+    if not _approval_session_owned(session):
+        return _err(rid, 4001, "session not found")
     return _approval_reply(
         rid, "resolved",
         lambda a: a.resolve_gateway_approval(

@@ -621,9 +621,8 @@ def test_approval_response_correlates_request_id(server, monkeypatch):
     assert calls == [("agent-1", "once", {"resolve_all": False, "request_id": "req-1"})]
 
 
-def test_approval_respond_falls_back_to_request_id_lookup(server, monkeypatch):
-    """A stale live sid must not 4001 an approval answer when the request_id
-    resolves to a live session (durable-identity fallback, #91684)."""
+def test_approval_respond_rejects_request_id_from_unrelated_session(server, monkeypatch):
+    """A request id cannot authorize a response naming an unrelated or retired session."""
     from tools import approval
 
     live = {"session_key": "agent-live", "history": []}
@@ -652,10 +651,8 @@ def test_approval_respond_falls_back_to_request_id_lookup(server, monkeypatch):
         }
     )
 
-    assert response["result"] == {"resolved": 1}
-    assert calls == [
-        ("agent-live", "once", {"resolve_all": False, "request_id": "req-91684"})
-    ]
+    assert response["error"]["code"] == 4001
+    assert calls == []
 
 
 def test_approval_respond_falls_back_to_stored_session_id(server, monkeypatch):

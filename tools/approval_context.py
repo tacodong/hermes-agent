@@ -171,7 +171,12 @@ def _is_gateway_approval_context() -> bool:
     """
     if _is_cron_approval_context() or _is_unattended_platform_approval_context():
         return False
-    return env_var_enabled("HERMES_GATEWAY_SESSION") or bool(_get_session_platform())
+    # A remote Desktop lazy-resume does not run _enable_gateway_prompts().
+    # Its turn still binds a GUI source and has a session-keyed notify callback;
+    # process flags must not decide whether that conversation can ask its user.
+    source = _session_env("HERMES_SESSION_SOURCE")
+    return (source in {"desktop", "tui"}
+            or env_var_enabled("HERMES_GATEWAY_SESSION") or bool(_get_session_platform()))
 
 
 def _resolve_cli_approval_callback(approval_callback=None):
