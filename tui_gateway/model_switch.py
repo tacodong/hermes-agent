@@ -273,12 +273,22 @@ def _sync_bot_capabilities(sid: str, session: dict) -> None:
     except Exception:
         return
     try:
-        tokens = _set_session_context(sid, cwd=_session_cwd(session))
-        try:
-            new_agent = _rebuild_session_agent(sid, session, session_id=session["session_key"],
-                                               platform_override=_session_source(session))
-        finally:
-            _clear_session_context(tokens)
+        # Session bindings are deliberately non-nestable: clearing a build scope
+        # would erase the active turn's Desktop approval/delivery identity. Keep
+        # the temporary build scope in a copied context, including on failure.
+        from contextvars import copy_context
+
+        def rebuild():
+            tokens = _set_session_context(
+                session["session_key"], cwd=_session_cwd(session), ui_session_id=sid)
+            try:
+                return _rebuild_session_agent(
+                    sid, session, session_id=session["session_key"],
+                    platform_override=_session_source(session))
+            finally:
+                _clear_session_context(tokens)
+
+        new_agent = copy_context().run(rebuild)
         new_agent._session_title_hint = "Bot Chat"
         session.update(agent=new_agent, config_model_seen=_config_model_target())
         _emit("notice", sid, {"message": "Capabilities updated — this bot's tools and prompt were refreshed."})

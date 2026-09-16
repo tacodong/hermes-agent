@@ -1,7 +1,7 @@
 name: Publish Desktop maintenance overlay
 on:
   push:
-    branches: [codex/desktop-capabilities]
+    branches: [codex/desktop-capabilities, codex/bot-chat-approval-context]
 permissions:
   contents: read
   packages: write

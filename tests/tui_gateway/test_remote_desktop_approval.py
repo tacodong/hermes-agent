@@ -105,3 +105,48 @@ def test_unattended_platform_still_denied(surface):
         assert _is_unattended_platform_approval_context()
     finally:
         clear_session_vars(tokens)
+
+
+@pytest.mark.parametrize("rebuild_fails", [False, True])
+def test_bot_capability_refresh_preserves_turn_approval_context(surface, monkeypatch, rebuild_fails):
+    from gateway.session_context import get_session_env
+    from tools import bot_mode_probe
+    from agent.runtime_cwd import _SESSION_CWD, set_session_cwd
+
+    server, approval, owner, foreign = surface
+    session = server._sessions["approval-owner"]
+    session["agent"]._session_title_hint = "Bot Chat"
+    session["bot_caps_seen"] = "old-capabilities"
+    session["cwd"] = "/tmp/synthetic-workspace"
+    keys = ("HERMES_SESSION_SOURCE", "HERMES_SESSION_KEY", "HERMES_SESSION_ID", "HERMES_UI_SESSION_ID")
+    set_session_cwd(session["cwd"])
+    before = {key: get_session_env(key) for key in keys}
+    build_context = {}
+
+    def rebuild(*args, **kwargs):
+        assert _SESSION_CWD.get() == session["cwd"]
+        build_context.update({key: get_session_env(key) for key in keys})
+        if rebuild_fails:
+            raise RuntimeError("synthetic rebuild failure")
+        return SimpleNamespace(session_id="approval-durable")
+
+    monkeypatch.setattr(bot_mode_probe, "capability_fingerprint", lambda home: "new-capabilities")
+    monkeypatch.setattr(server, "_rebuild_session_agent", rebuild)
+    monkeypatch.setattr(server, "_config_model_target", lambda: ("synthetic-model",))
+    server._sync_bot_capabilities("approval-owner", session)
+    assert {key: get_session_env(key) for key in keys} == before
+    assert build_context == before
+    assert _SESSION_CWD.get() == session["cwd"]
+    # The same turn must still route a real dangerous-command gate to its owner.
+    while not owner.frames.empty():
+        owner.frames.get_nowait()  # capability refresh notice
+    command = "chmod -R 777 /tmp/synthetic-after-refresh"
+    thread, results = start_gate(approval, command)
+    event = owner.frames.get(timeout=15)["params"]
+    assert event["type"] == "approval.request"
+    assert event["payload"]["command"] == command
+    request_id = event["payload"]["request_id"]
+    assert reply(server, foreign, "approval-owner", request_id, "once")["error"]["code"] == 4001
+    assert reply(server, owner, "approval-owner", request_id, "deny")["result"]["resolved"] == 1
+    thread.join(10)
+    assert results.get(timeout=1)["approved"] is False

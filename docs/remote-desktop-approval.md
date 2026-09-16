@@ -62,3 +62,20 @@ Scheduler liveness also consults live named-owner topology, so a satellite serve
 by a named multiplexer does not receive a false inactive warning. Regression
 coverage exercises custom roots, context-local homes, secret removal, and served
 versus unrelated or unknown scheduler owners.
+
+### Capability refresh preserves the active turn
+
+Bot Chat checks its capability fingerprint at turn start. A changed fingerprint
+rebuilt the agent inside a nested session binding, whose non-nestable cleanup
+cleared the outer turn's Desktop source, durable key, UI ID and cwd. Subsequent
+command approvals could fall back to CLI input despite a registered Desktop
+callback. The rebuild now runs in a copied context and binds the durable key
+separately from the UI ID. Both successful and failed rebuilds leave the active
+turn intact. Profile/provider selection and approval policy remain unchanged.
+
+`test_remote_desktop_approval.py` exercises the actual refresh helper followed by
+the real approval gate/event/response path, with a synthetic agent constructor.
+It covers rebuild failure, exact command delivery, denial, foreign transport
+rejection, one-use responses and closed timeout. The refresh cases fail before
+the fix because all four routing fields are cleared. Live acceptance must also
+change the fingerprint after an initial Bot Chat turn, then verify the next turn.
