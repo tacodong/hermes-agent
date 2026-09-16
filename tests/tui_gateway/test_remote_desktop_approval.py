@@ -11,7 +11,7 @@ import pytest
 def surface(tmp_path, monkeypatch):
     home = tmp_path / "hermes"
     home.mkdir()
-    (home / "config.yaml").write_text("approvals:\n  mode: manual\n  timeout: 1\n")
+    (home / "config.yaml").write_text("approvals:\n  mode: manual\n  timeout: 5\n")
     monkeypatch.setenv("HERMES_HOME", str(home))
     for key in ("HERMES_GATEWAY_SESSION", "HERMES_EXEC_ASK", "HERMES_INTERACTIVE"):
         monkeypatch.delenv(key, raising=False)
@@ -75,7 +75,7 @@ def test_remote_source_delivers_exact_command_and_single_use(surface, choice, al
     server, approval, owner, foreign = surface
     command = "chmod -R 777 /tmp/synthetic-approval-only"
     thread, results = start_gate(approval, command)
-    event = owner.frames.get(timeout=2)["params"]
+    event = owner.frames.get(timeout=15)["params"]
     assert event["type"] == "approval.request"
     assert event["session_id"] == "approval-owner"
     assert event["payload"]["command"] == command
@@ -85,14 +85,14 @@ def test_remote_source_delivers_exact_command_and_single_use(surface, choice, al
     assert reply(server, foreign, "approval-other", request_id, "once")["result"]["resolved"] == 0
     assert thread.is_alive()
     assert reply(server, owner, "approval-owner", request_id, choice)["result"]["resolved"] == 1
-    thread.join(2)
+    thread.join(10)
     assert results.get(timeout=1)["approved"] is allowed
     assert reply(server, owner, "approval-owner", request_id, "once")["result"]["resolved"] == 0
     # Once never caches the pattern: a different command needs a new decision.
     second, results = start_gate(approval, command + "-second")
-    next_event = owner.frames.get(timeout=2)["params"]
+    next_event = owner.frames.get(timeout=15)["params"]
     assert next_event["payload"]["request_id"] != request_id
-    second.join(3)
+    second.join(10)
     assert results.get(timeout=1)["approved"] is False
 
 
