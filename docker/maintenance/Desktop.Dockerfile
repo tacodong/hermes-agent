@@ -6,4 +6,5 @@ LABEL org.opencontainers.image.revision=$HERMES_GIT_SHA
 COPY tools/approval_context.py tools/process_registry.py tools/bot_mode_dm.py tools/file_operations.py /opt/hermes/tools/
 COPY tui_gateway/methods_prompt.py tui_gateway/session_workdir.py /opt/hermes/tui_gateway/
 COPY agent/file_safety.py /opt/hermes/agent/
-COPY hermes_cli/config.py /opt/hermes/hermes_cli/
+COPY hermes_cli/config.py hermes_cli/cron.py /opt/hermes/hermes_cli/
+COPY cron/scheduler_delivery.py /opt/hermes/cron/

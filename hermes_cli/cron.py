@@ -62,7 +62,20 @@ def _builtin_gateway_liveness() -> Optional[bool]:
         from hermes_cli.gateway import (
             find_gateway_pids, named_profile_served_by_running_multiplexer)
         # Satellite profile: no local gateway.pid, but the default multiplexer ticks its store.
-        return bool(find_gateway_pids()) or named_profile_served_by_running_multiplexer()
+        if find_gateway_pids() or named_profile_served_by_running_multiplexer():
+            return True
+        # The multiplexer may itself belong to a named profile. Reuse the
+        # live-owner topology, not the mere presence of a configured route.
+        from hermes_cli.profiles import get_active_profile_name
+        from hermes_cli.web_server_gateway import _collect_profile_gateway_topology
+        topology = _collect_profile_gateway_topology()
+        if topology.get("gateway_mode") == "unknown":
+            return None
+        profile = get_active_profile_name()
+        return any(
+            profile in gateway.get("served_profiles", [])
+            for gateway in topology.get("gateways", [])
+        )
     except Exception:
         return None
 

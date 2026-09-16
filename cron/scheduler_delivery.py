@@ -665,11 +665,16 @@ def _deliver_to_bot_chat(job: dict, content: str, profile: str) -> Optional[str]
         logger.warning("Job '%s': %s", job_id, msg, **log_kwargs)
         return msg
 
-    env = os.environ.copy()
+    from hermes_constants import get_default_hermes_root, get_hermes_home
+    from tools.environments.local import hermes_subprocess_env
+
+    # Reload credentials from the recipient profile, not the gateway owner.
+    env = hermes_subprocess_env()
+    env["HERMES_HOME"] = str(get_hermes_home())
     if profile:
         argv += ["-p", profile]
-        # -p owns profile resolution; this scheduler's HERMES_HOME must not shadow it.
-        env.pop("HERMES_HOME", None)
+        # -p resolves beneath this installation root, including custom Docker roots.
+        env["HERMES_HOME"] = str(get_default_hermes_root())
 
     # Prefix marks this as scheduled output, not the human (Bot Mode sender-attribution).
     message = (

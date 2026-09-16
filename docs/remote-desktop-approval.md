@@ -52,3 +52,13 @@ existing process root. Credential/system guards remain. This is a file-tool
 boundary, not an OS sandbox or protection against concurrent filesystem races.
 Tests use a synthetic SSH transport over real files for write/readback, patch,
 move refusal, symlink escape, malformed roots and cross-profile fallback.
+
+### Scheduled results under a named multiplex owner
+
+Bot Chat cron delivery retains the custom installation root for explicit profile
+selection and the context-local home for own-profile delivery. Child processes
+reload recipient credentials rather than inheriting gateway-owner credentials.
+Scheduler liveness also consults live named-owner topology, so a satellite served
+by a named multiplexer does not receive a false inactive warning. Regression
+coverage exercises custom roots, context-local homes, secret removal, and served
+versus unrelated or unknown scheduler owners.
