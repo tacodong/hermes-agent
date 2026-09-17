@@ -583,7 +583,7 @@ def test_approval_received_acknowledges_exact_request(server, monkeypatch):
     monkeypatch.setattr(
         approval,
         "ack_gateway_approval",
-        lambda key, request_id: calls.append((key, request_id)) or True,
+        lambda key, request_id, *, rendered=False: calls.append((key, request_id, rendered)) or True,
     )
 
     response = server.handle_request(
@@ -595,7 +595,7 @@ def test_approval_received_acknowledges_exact_request(server, monkeypatch):
     )
 
     assert response["result"] == {"acknowledged": True}
-    assert calls == [("agent-1", "req-1")]
+    assert calls == [("agent-1", "req-1", False)]
 
 
 def test_approval_response_correlates_request_id(server, monkeypatch):

@@ -1132,7 +1132,8 @@ def _(rid, params: dict) -> dict:
     if not isinstance(request_id := params.get("request_id"), str) or not request_id:
         return _err(rid, 4006, "request_id required")
     return _approval_reply(
-        rid, "acknowledged", lambda a: a.ack_gateway_approval(session["session_key"], request_id))
+        rid, "acknowledged", lambda a: a.ack_gateway_approval(
+            session["session_key"], request_id, rendered=params.get("rendered") is True))
 
 
 def _approval_respond_session_fallback(params: dict):

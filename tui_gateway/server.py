@@ -667,7 +667,15 @@ def _emit_approval_request(sid: str, data: dict | None) -> None:
 
     Reuse the shared gateway See #48456, #50767.
     """
-    _emit("approval.request", sid, _approval_request_payload(data))
+    payload = _approval_request_payload(data)
+    session = _sessions.get(sid)
+    if session is None or (_session_source(session) == "desktop" and session.get("transport") is None):
+        raise RuntimeError("Desktop approval owner is detached; reconnect before requesting approval")
+    delivered = write_json(_event_frame("approval.request", sid, payload))
+    logger.info("approval_delivery request=%s ui_session=%s accepted=%s pid=%s",
+                payload.get("request_id"), sid, delivered, os.getpid())
+    if not delivered:
+        raise RuntimeError("Desktop approval transport disconnected before delivery")
 
 
 def _status_update(sid: str, kind: str, text: str | None = None):
