@@ -1,7 +1,7 @@
 'use client'
 
 import { useStore } from '@nanostores/react'
-import { type FC, useCallback, useEffect, useMemo, useState } from 'react'
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useSessionView } from '@/app/chat/session-view'
 import { Button } from '@/components/ui/button'
@@ -65,8 +65,6 @@ export const PendingToolApproval: FC<{ part: ToolPart }> = ({ part }) => {
 }
 
 const InlineApprovalBar: FC<{ request: ApprovalRequest }> = ({ request }) => {
-  useEffect(() => registerApprovalInlineAnchor(request.sessionId), [request.sessionId])
-
   return <ApprovalBar request={request} surface="inline" />
 }
 
@@ -109,6 +107,31 @@ const ApprovalBar: FC<{ request: ApprovalRequest; surface: 'floating' | 'inline'
   const copy = t.assistant.approval
   const gateway = useStore($gateway)
   const [submitting, setSubmitting] = useState<ApprovalChoice | null>(null)
+  const element = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    if (!element.current || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(([entry]) => {
+      setVisible(Boolean(entry?.isIntersecting && entry.intersectionRatio > 0))
+    })
+    observer.observe(element.current)
+    return () => observer.disconnect()
+  }, [request.requestId])
+
+  useEffect(() => {
+    if (surface === 'inline' && visible) return registerApprovalInlineAnchor(request.sessionId)
+  }, [surface, visible, request.sessionId, request.requestId])
+
+  useEffect(() => {
+    if (!visible || !gateway || !request.sessionId || !request.requestId) return
+    // Receipt means the control intersected the viewport, never that the user consented.
+    void requestForOwnedSession(request.sessionId, gateway.request.bind(gateway), 'approval.received', {
+      session_id: request.sessionId,
+      request_id: request.requestId,
+      rendered: true
+    }).catch(() => undefined)
+  }, [visible, gateway, request.sessionId, request.requestId])
   // "Always allow" persists the pattern to ~/.hermes/config.yaml permanently, so
   // it goes through a confirm step rather than firing straight from the menu.
   const [confirmAlways, setConfirmAlways] = useState(false)
@@ -148,7 +171,7 @@ const ApprovalBar: FC<{ request: ApprovalRequest; surface: 'floating' | 'inline'
         // ambient only when no owner is known. The ambient socket follows
         // foreground focus, and for a cross-profile session it points at a
         // backend that never held this approval (#91684 client half).
-        await requestForOwnedSession<{ resolved?: boolean }>(
+        const result = await requestForOwnedSession<{ resolved?: number | boolean }>(
           request.sessionId,
           // Bound (not wrapped) so the ambient fallback keeps the exact
           // 2-arg call shape gateway.request callers assert on.
@@ -160,6 +183,9 @@ const ApprovalBar: FC<{ request: ApprovalRequest; surface: 'floating' | 'inline'
             session_id: request.sessionId ?? undefined
           }
         )
+        if (!result.resolved) {
+          throw new Error('This approval is no longer pending. No operation was approved.')
+        }
         triggerHaptic(choice === 'deny' ? 'cancel' : 'submit')
         clearApprovalRequest(request.sessionId, request.requestId)
         void replayPendingApproval(gateway, request.sessionId).catch(() => undefined)
@@ -180,6 +206,7 @@ const ApprovalBar: FC<{ request: ApprovalRequest; surface: 'floating' | 'inline'
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!visible) return
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault()
         void respond('once')
@@ -192,10 +219,11 @@ const ApprovalBar: FC<{ request: ApprovalRequest; surface: 'floating' | 'inline'
     window.addEventListener('keydown', onKeyDown, true)
 
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [confirmAlways, respond])
+  }, [confirmAlways, respond, visible])
 
   return (
     <div
+      ref={element}
       className={cn(surface === 'inline' ? 'mt-1 ps-5' : 'mt-2')}
       data-slot={surface === 'inline' ? 'tool-approval-inline' : 'tool-approval-actions'}
     >
