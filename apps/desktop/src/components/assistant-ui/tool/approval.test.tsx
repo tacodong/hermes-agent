@@ -12,6 +12,23 @@ import type { ToolPart } from './fallback-model'
 // Radix's DropdownMenu touches pointer-capture + scrollIntoView, which jsdom
 // doesn't implement; stub them so the menu can open in tests.
 beforeAll(() => {
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      constructor(private callback: IntersectionObserverCallback) {}
+      observe(element: Element) {
+        let hidden = false
+        for (let e: Element | null = element; e; e = e.parentElement) {
+          if ((e as HTMLElement).style?.display === 'none') hidden = true
+        }
+        this.callback(
+          [{ isIntersecting: !hidden, intersectionRatio: hidden ? 0 : 1 } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver
+        )
+      }
+      disconnect() {}
+    }
+  )
   const proto = window.HTMLElement.prototype as unknown as Record<string, () => unknown>
 
   const stubs: Record<string, () => unknown> = {
@@ -188,4 +205,17 @@ describe('PendingToolApproval', () => {
       expect(container.querySelector('[data-slot="tool-approval-fallback"]')).toBeNull()
     })
   })
+})
+
+it('keeps a reachable fallback when a mounted inline approval is outside the viewport', async () => {
+  setRequest('sudo -n python3 - <<\'PY\'\nprint("synthetic")\nPY')
+  const { container } = render(
+    <>
+      <div style={{ display: 'none' }}>
+        <PendingToolApproval part={part('terminal')} />
+      </div>
+      <PendingApprovalFallback />
+    </>
+  )
+  await waitFor(() => expect(container.querySelector('[data-slot="tool-approval-fallback"]')).not.toBeNull())
 })
