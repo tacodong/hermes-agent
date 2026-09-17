@@ -150,3 +150,105 @@ def test_bot_capability_refresh_preserves_turn_approval_context(surface, monkeyp
     assert reply(server, owner, "approval-owner", request_id, "deny")["result"]["resolved"] == 1
     thread.join(10)
     assert results.get(timeout=1)["approved"] is False
+
+
+def test_disconnected_owner_reports_delivery_failure_instead_of_human_timeout(surface, monkeypatch):
+    server, approval, owner, _foreign = surface
+    monkeypatch.setattr(owner, "write", lambda frame: False)
+    thread, results = start_gate(approval, "chmod -R 777 /tmp/synthetic-disconnected")
+    thread.join(1)
+    assert not thread.is_alive(), "known failed delivery must not wait for nonexistent user input"
+    result = results.get(timeout=1)
+    assert result["approved"] is False
+    assert result["outcome"] == "notify_failed"
+
+
+@pytest.mark.parametrize("command", [
+    "chmod -R 777 /tmp/approval-harness/fixture",
+    "sudo -n python3 - <<'PY'\nprint('APPROVAL-HARNESS')\nPY",
+    "set -eu\nprintf 'preflight\\n'\nsudo -n stat /tmp/approval-harness/fixture\nsudo -n python3 - <<'PY'\nprint('APPROVAL-HARNESS')\nPY\nprintf 'done\\n'",
+])
+@pytest.mark.parametrize("choice", ["once", "deny", "timeout"])
+def test_command_shape_matrix_with_receipts_replay_and_late_responses(surface, monkeypatch, command, choice):
+    from tools import approval_context
+    from tui_gateway.transport import bind_transport, reset_transport
+    server, approval, owner, foreign = surface
+    monkeypatch.setattr(approval_context, "_get_approval_timeout", lambda: 0.4 if choice == "timeout" else 5)
+    results = queue.Queue()
+    ctx = contextvars.copy_context()
+    thread = threading.Thread(target=lambda: results.put(ctx.run(approval.check_all_command_guards, command, "ssh")))
+    thread.start()
+    event = owner.frames.get(timeout=10)["params"]
+    request_id = event["payload"]["request_id"]
+    assert event["payload"]["command"] == command
+    for peer, expected in ((foreign, False), (owner, True)):
+        token = bind_transport(peer)
+        try:
+            receipt = server.handle_request({"id": "receipt", "method": "approval.received", "params": {
+                "session_id": "approval-owner", "request_id": request_id, "rendered": True}})
+            assert (receipt.get("result", {}).get("acknowledged") is True) == expected
+        finally:
+            reset_transport(token)
+    # Reconnect replay reads the same pending request, never another execution.
+    assert server._pending_approval_request_payload("approval-durable")["request_id"] == request_id
+    assert reply(server, foreign, "approval-owner", request_id, "once")["error"]["code"] == 4001
+    if choice != "timeout":
+        assert reply(server, owner, "approval-owner", request_id, choice)["result"]["resolved"] == 1
+    thread.join(8)
+    result = results.get(timeout=1)
+    assert result["approved"] is (choice == "once")
+    if choice == "timeout":
+        assert result["outcome"] == "timeout"
+    assert reply(server, owner, "approval-owner", request_id, "once")["result"]["resolved"] == 0
+
+
+def test_unreceived_timeout_does_not_blame_user(surface, monkeypatch):
+    from tools import approval_context
+    server, approval, owner, _ = surface
+    monkeypatch.setattr(approval_context, "_get_approval_timeout", lambda: 0.1)
+    thread, results = start_gate(approval, "chmod -R 777 /tmp/synthetic-no-receipt")
+    request = owner.frames.get(timeout=5)["params"]["payload"]
+    thread.join(3)
+    result = results.get(timeout=1)
+    assert result["outcome"] == "delivery_timeout"
+    assert request["request_id"] in result["message"]
+    assert "not acknowledged by Desktop" in result["message"]
+
+
+@pytest.mark.parametrize("shape", ["simple", "heredoc", "compound"])
+def test_resume_and_reconnect_preserve_pending_request_owner(surface, monkeypatch, shape):
+    """Real resume RPC and pending RPC, isolated peers; no production consent."""
+    from tui_gateway.transport import bind_transport, reset_transport
+    server, approval, old_peer, foreign = surface
+    session = server._sessions["approval-owner"]
+    session.update(pending_title="Bot Chat", pending_hidden=True, running=False,
+                   last_active=0, history_lock=threading.Lock())
+    # A lazy canonical Bot Chat has no database row yet; resume must still bind it.
+    session.pop("agent", None)
+    new_peer = type(old_peer)()
+    def rpc(peer, method, params):
+        token = bind_transport(peer)
+        try:
+            return server.handle_request({"id": "lifecycle", "method": method, "params": params})
+        finally:
+            reset_transport(token)
+    resumed = rpc(old_peer, "session.resume", {"session_id": "approval-durable", "omit_messages": True})
+    assert resumed["result"]["session_id"] == "approval-owner", resumed
+    commands = {
+        "simple": "chmod -R 777 /tmp/approval-reconnect/fixture",
+        "heredoc": "sudo -n python3 - <<'PY'\nprint('RECONNECT')\nPY",
+        "compound": "set -eu\nsudo -n stat /tmp/approval-reconnect/fixture\nsudo -n python3 - <<'PY'\nprint('RECONNECT')\nPY",
+    }
+    thread, results = start_gate(approval, commands[shape])
+    event = old_peer.frames.get(timeout=10)["params"]
+    request_id = event["payload"]["request_id"]
+    # Reattach through the supported session resume method, then hydrate pending.
+    resumed = rpc(new_peer, "session.resume", {"session_id": "approval-durable", "omit_messages": True})
+    assert resumed["result"]["session_id"] == "approval-owner", resumed
+    pending = rpc(new_peer, "approval.pending", {"session_id": "approval-owner"})
+    assert request_id in str(pending), pending
+    assert reply(server, foreign, "approval-owner", request_id, "once")["error"]["code"] == 4001
+    assert reply(server, new_peer, "approval-owner", request_id, "deny")["result"]["resolved"] == 1
+    thread.join(10)
+    assert results.get(timeout=1)["approved"] is False
+    assert reply(server, new_peer, "approval-owner", request_id, "once")["result"]["resolved"] == 0

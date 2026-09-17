@@ -175,12 +175,16 @@ def list_gateway_approvals(session_key: str) -> list[dict]:
         return [dict(entry.data) for entry in _gateway_queues.get(session_key, [])]
 
 
-def ack_gateway_approval(session_key: str, request_id: str) -> bool:
+def ack_gateway_approval(session_key: str, request_id: str, *, rendered: bool = False) -> bool:
     """Record that a client received a particular pending approval request."""
     with _lock:
         for entry in _gateway_queues.get(session_key, []):
             if entry.data.get("request_id") == request_id:
+                changed = not entry.acknowledged or (rendered and not entry.rendered)
                 entry.acknowledged = True
+                entry.rendered = entry.rendered or rendered
+                if changed:
+                    logger.info("approval_receipt request=%s rendered=%s", request_id, entry.rendered)
                 return True
     return False
 
@@ -726,6 +730,14 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
             # relayed verbatim so the agent can adapt rather than only hearing "denied".
             choice, deny_reason = decision["choice"], decision.get("reason")
             if not decision["resolved"]:
+                from gateway.session_context import get_session_env
+                if get_session_env("HERMES_SESSION_SOURCE") == "desktop" and not decision.get("rendered"):
+                    receipt = "received by Desktop, but visible rendering was not confirmed" if decision.get("received") else "not acknowledged by Desktop"
+                    return _denied(
+                        f"BLOCKED: Approval expired: request {decision.get('request_id', '')} was {receipt}. "
+                        "No command executed. Reconnect Desktop and report this request ID to diagnose delivery. "
+                        "Do NOT retry without a new user decision. Silence is not consent.",
+                        pattern_key=pattern_key, description=description, outcome="delivery_timeout")
                 return deny(spec.gateway_refused, "timeout", reason="timed out without user response",
                             reason_addendum="", timeout_addendum=" Silence is not consent.",
                             deny_reason=deny_reason)

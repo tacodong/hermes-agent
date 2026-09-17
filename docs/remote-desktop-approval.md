@@ -79,3 +79,34 @@ It covers rebuild failure, exact command delivery, denial, foreign transport
 rejection, one-use responses and closed timeout. The refresh cases fail before
 the fix because all four routing fields are cleared. Live acceptance must also
 change the fingerprint after an initial Bot Chat turn, then verify the next turn.
+
+### Delivery and visible-render receipts
+
+The later real preflight used call `call_ES8N3gMJg5dk90z2k85dVOmt` in the existing
+Bot Chat. Server evidence records 00:36:30 UTC submission, 00:37:24 tool call,
+00:42:25 closed approval timeout, and 00:42:35 final response (September 17).
+The reported long wait was not 24 minutes of command execution: the subsequent
+status question arrived at 01:02:37. Historic telemetry cannot establish when
+that final response became visible, or whether the approval rendered; the event
+ring has since evicted the request. The command is not replayed.
+
+Two independently reproduced defects remained after the context repair:
+`_emit_approval_request` ignored a transport's false write result, and a mounted
+but hidden inline control suppressed the floating approval fallback. Failing
+regressions precede both fixes. These are demonstrated failure mechanisms, not
+proof of which occurred in the historical incident.
+
+Known transport rejection now blocks immediately. The native `approval.received`
+RPC optionally records a viewport-render receipt; it never grants consent and
+retains session/transport ownership checks. Registration, transport acceptance,
+receipt and resolution logs correlate request IDs and elapsed time without
+command bodies, credentials or profile paths. Missing rendering confirmation at
+timeout reports delivery uncertainty rather than claiming the user ignored a
+visible prompt. A viewport observer keeps the fallback reachable for off-screen
+or hidden inline controls. Stale/duplicate zero-resolution responses show an
+error rather than claiming approval succeeded.
+
+The client build is pinned to the actual installed client source `8068c09432`,
+with only the approval component/test patch applied; the backend remains on its
+existing maintenance base. Automated drivers are restricted to isolated tests.
+Live acceptance requires the human user to click approval decisions.

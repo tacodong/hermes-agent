@@ -11,6 +11,7 @@ call time.
 """
 
 import logging
+import hashlib
 import threading
 import time
 import uuid
@@ -24,13 +25,14 @@ logger = logging.getLogger("tools.approval")
 
 class _ApprovalEntry:
     """One pending dangerous-command approval inside a gateway session."""
-    __slots__ = ("event", "data", "result", "reason", "acknowledged")
+    __slots__ = ("event", "data", "result", "reason", "acknowledged", "rendered")
 
     def __init__(self, data: dict):
         self.event = threading.Event()
         self.data = dict(data)
         self.data.setdefault("request_id", uuid.uuid4().hex)
         self.acknowledged = False
+        self.rendered = False
         self.result: str | None = None  # "once"|"session"|"always"|"deny"
         # Free-text reason from ``/deny <reason>`` so the agent can adapt, not just hear "denied".
         self.reason: str | None = None
@@ -136,6 +138,12 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict, *,
             return adopted
 
     entry = _ApprovalEntry(approval_data)
+    started = time.monotonic()
+    # Correlation only: never log commands, descriptions, credentials or profile paths.
+    correlation = hashlib.sha256(session_key.encode()).hexdigest()[:16]
+    logger.info("approval_registered request=%s session=%s command_sha256=%s surface=%s",
+                entry.data["request_id"], correlation,
+                hashlib.sha256(str(approval_data.get("command", "")).encode()).hexdigest(), surface)
     with _approval._lock:
         _approval._gateway_queues.setdefault(session_key, []).append(entry)
 
@@ -153,7 +161,7 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict, *,
     try:
         notify_cb(dict(entry.data))
     except Exception as exc:
-        logger.warning("Gateway approval notify failed: %s", exc)
+        logger.warning("approval_delivery_failed request=%s error_type=%s", entry.data["request_id"], type(exc).__name__)
         _drop_entry()
         _ctx._fire_approval_hook("post_approval_response", **payload, choice="notify_failed")
         return {"resolved": False, "choice": None, "notify_failed": True}
@@ -164,4 +172,11 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict, *,
         entry.result = "deny"
         entry.event.set()
     _drop_entry()
-    return _finish(payload, state != "timeout", entry.result, entry.reason)
+    logger.info("approval_finished request=%s session=%s state=%s choice=%s received=%s rendered=%s elapsed=%.3f",
+                entry.data["request_id"], correlation, state, entry.result,
+                entry.acknowledged, entry.rendered, time.monotonic() - started)
+    from gateway.session_context import get_session_env
+    receipt = ({"received": entry.acknowledged, "rendered": entry.rendered,
+                "request_id": entry.data["request_id"]}
+               if get_session_env("HERMES_SESSION_SOURCE") == "desktop" else {})
+    return _finish(payload, state != "timeout", entry.result, entry.reason, **receipt)

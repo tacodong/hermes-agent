@@ -8,3 +8,6 @@ COPY tui_gateway/methods_prompt.py tui_gateway/session_workdir.py tui_gateway/mo
 COPY agent/file_safety.py /opt/hermes/agent/
 COPY hermes_cli/config.py hermes_cli/cron.py /opt/hermes/hermes_cli/
 COPY cron/scheduler_delivery.py /opt/hermes/cron/
+
+COPY tools/approval.py tools/approval_gateway_wait.py /opt/hermes/tools/
+COPY tui_gateway/server.py /opt/hermes/tui_gateway/
