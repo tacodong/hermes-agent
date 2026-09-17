@@ -1,7 +1,7 @@
 name: Publish Desktop maintenance overlay
 on:
   push:
-    branches: [codex/desktop-capabilities, codex/approval-delivery-lifecycle]
+    branches: [codex/desktop-capabilities]
 permissions:
   contents: read
   packages: write

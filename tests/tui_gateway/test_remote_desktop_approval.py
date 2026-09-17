@@ -213,3 +213,42 @@ def test_unreceived_timeout_does_not_blame_user(surface, monkeypatch):
     assert result["outcome"] == "delivery_timeout"
     assert request["request_id"] in result["message"]
     assert "not acknowledged by Desktop" in result["message"]
+
+
+@pytest.mark.parametrize("shape", ["simple", "heredoc", "compound"])
+def test_resume_and_reconnect_preserve_pending_request_owner(surface, monkeypatch, shape):
+    """Real resume RPC and pending RPC, isolated peers; no production consent."""
+    from tui_gateway.transport import bind_transport, reset_transport
+    server, approval, old_peer, foreign = surface
+    session = server._sessions["approval-owner"]
+    session.update(pending_title="Bot Chat", pending_hidden=True, running=False,
+                   last_active=0, history_lock=threading.Lock())
+    # A lazy canonical Bot Chat has no database row yet; resume must still bind it.
+    session.pop("agent", None)
+    new_peer = type(old_peer)()
+    def rpc(peer, method, params):
+        token = bind_transport(peer)
+        try:
+            return server.handle_request({"id": "lifecycle", "method": method, "params": params})
+        finally:
+            reset_transport(token)
+    resumed = rpc(old_peer, "session.resume", {"session_id": "approval-durable", "omit_messages": True})
+    assert resumed["result"]["session_id"] == "approval-owner", resumed
+    commands = {
+        "simple": "chmod -R 777 /tmp/approval-reconnect/fixture",
+        "heredoc": "sudo -n python3 - <<'PY'\nprint('RECONNECT')\nPY",
+        "compound": "set -eu\nsudo -n stat /tmp/approval-reconnect/fixture\nsudo -n python3 - <<'PY'\nprint('RECONNECT')\nPY",
+    }
+    thread, results = start_gate(approval, commands[shape])
+    event = old_peer.frames.get(timeout=10)["params"]
+    request_id = event["payload"]["request_id"]
+    # Reattach through the supported session resume method, then hydrate pending.
+    resumed = rpc(new_peer, "session.resume", {"session_id": "approval-durable", "omit_messages": True})
+    assert resumed["result"]["session_id"] == "approval-owner", resumed
+    pending = rpc(new_peer, "approval.pending", {"session_id": "approval-owner"})
+    assert request_id in str(pending), pending
+    assert reply(server, foreign, "approval-owner", request_id, "once")["error"]["code"] == 4001
+    assert reply(server, new_peer, "approval-owner", request_id, "deny")["result"]["resolved"] == 1
+    thread.join(10)
+    assert results.get(timeout=1)["approved"] is False
+    assert reply(server, new_peer, "approval-owner", request_id, "once")["result"]["resolved"] == 0
